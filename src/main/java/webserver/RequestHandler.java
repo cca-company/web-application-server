@@ -22,6 +22,7 @@ public class RequestHandler extends Thread {
 	private static final Logger log = LoggerFactory.getLogger(RequestHandler.class);
 
 	private Socket connection;
+	public String cookieQuery = "logined=false";
 
 	public RequestHandler(Socket connectionSocket) {
 		this.connection = connectionSocket;
@@ -32,18 +33,49 @@ public class RequestHandler extends Thread {
 				connection.getPort());
 
 		try (InputStream in = connection.getInputStream(); OutputStream out = connection.getOutputStream()) {
+			
+			// 버퍼리더를 이용해 url 추출 
 			BufferedReader bfr = new BufferedReader(new InputStreamReader(in));
+			String line = bfr.readLine();
+			String[] tokens = line.split(" ");
+			String url = tokens[1];
+			int index = url.indexOf("?");
+			String requestPath = url;
+			
+			// 파라미터가 있을 경우 
+			if (index != -1) {
+				requestPath = url.substring(0, index);
+				String params = url.substring(index + 1);
+			}
 
-			String url = getRequest(bfr);
+			int contentLength = 0;
+			while (!"".equals(line)) {
+				if (line == null) {
+					break;
+				}
+				System.out.println(line);
+				line = bfr.readLine();
+				String[] token = line.split(" ");
+				if (token[0].equals("Content-Length:")) {
+					contentLength = Integer.parseInt(token[1]);
+				}
+			}
+			System.out.println("\n");
+			String content = IOUtils.readData(bfr, contentLength);
 
 			DataOutputStream dos = new DataOutputStream(out);
 
-			if(url.equals("/user/create")){
+			// 요청 url별 처리 
+			if (requestPath.equals("/user/create")) {
+				addMember(content);
 				response302Header(dos, "/index.html");
-			}else{
-	
-	
-				byte[] body = Files.readAllBytes(new File("./webapp" + url).toPath());
+			} 
+			else if(requestPath.equals("/user/login")){
+				cookieQuery = "logined=true";
+				response302Header(dos, "/index.html");
+			}
+			else {
+				byte[] body = Files.readAllBytes(new File("./webapp" + requestPath).toPath());
 				response200Header(dos, body.length);
 				responseBody(dos, body);
 			}
@@ -57,16 +89,19 @@ public class RequestHandler extends Thread {
 			dos.writeBytes("HTTP/1.1 200 OK \r\n");
 			dos.writeBytes("Content-Type: text/html;charset=utf-8\r\n");
 			dos.writeBytes("Content-Length: " + lengthOfBodyContent + "\r\n");
+			dos.writeBytes("Set-Cookie: "+ cookieQuery + "\r\n");
 			dos.writeBytes("\r\n");
+			System.out.println(cookieQuery);
 		} catch (IOException e) {
 			log.error(e.getMessage());
 		}
 	}
+
 	
 	private void response302Header(DataOutputStream dos, String url) {
 		try {
 			dos.writeBytes("HTTP/1.1 302 Found \r\n");
-			dos.writeBytes("Location: "+url+" \r\n");
+			dos.writeBytes("Location: " + url + " \r\n");
 			dos.writeBytes("\r\n");
 		} catch (IOException e) {
 			log.error(e.getMessage());
@@ -80,45 +115,6 @@ public class RequestHandler extends Thread {
 		} catch (IOException e) {
 			log.error(e.getMessage());
 		}
-	}
-
-	private String getRequest(BufferedReader bfr) throws IOException {
-		String line = bfr.readLine();
-		String url = getUrl(line);
-		
-		int contentLength = 0;
-		while (!"".equals(line)) {
-			if (line == null) {
-				break;
-			}
-			System.out.println(line);
-			line = bfr.readLine();
-			String[] token = line.split(" ");
-			if(token[0].equals("Content-Length:")){
-				contentLength = Integer.parseInt(token[1]);
-			}
-		}
-		String content = IOUtils.readData(bfr, contentLength);
-		System.out.println(addMember(content).toString());
-		System.out.println(content);
-		
-		
-		return url;
-	}
-
-	private String getUrl(String line) {
-		String[] tokens = line.split(" ");
-		String url = tokens[1];
-		int index = url.indexOf("?");
-		
-		if(index != -1){
-			String requestPath = url.substring(0, index);
-			String params = url.substring(index + 1);
-		}
-		
-		String requestPath = url;
-
-		return requestPath;
 	}
 
 	private User addMember(String query) {
